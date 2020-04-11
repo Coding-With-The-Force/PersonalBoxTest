@@ -1,0 +1,17 @@
+<apex:page applyHtmlTag="true" docType="html-5.0" showHeader="false" sidebar="false" standardStylesheets="false"> 
+ <html> 
+ 	 <head>  
+ 	 	 <apex:stylesheet value="{!$Resource.PDFtoVFP_Default_Generated_PDF_Page_CSS}"/> 
+ 	</head> 
+ 
+ 	 <body class="pdfContainer"> 
+ 	 	 <div class="pageContainer">
+ 	 	 	 <div class="page"> 
+ 	 	 	 	 <div class="pageElement"> 
+ 	 	 	 	 	 <img src="/sfc/servlet.shepherd/version/download/0681H000006DLB5QAO"/> 
+ 	 	 	 	</div> 
+ 	 	 	</div> <!--divAdd--> 
+ 	 	 </div> 
+ 	 </body>
+ </html> 
+</apex:page>

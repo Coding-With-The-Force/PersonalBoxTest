@@ -1,0 +1,807 @@
+<!--
+    Page used for the homepage of the PDF to VFP converter.
+    The primary purpose of this page is to take pdfs, turn them into PNGs, send those PNGs to the controller and have them converted to ContentDocuments
+    and PDFPages so that we can generate a VF Page from the ContentDocuments and PDFPages
+    Created by: Matt Gerry ::: gAuto ::: 06/17/2018
+-->
+
+<apex:page docType="html-5.0" controller="PDFtoVFP_Generator" sidebar="false" standardStylesheets="false" showHeader="false">
+    <html>
+        <head>
+            <!--Including the libraries and CSS that make all this stuff possible-->
+            <script type="text/javascript" src="https://code.jquery.com/jquery-3.4.1.min.js" />
+            <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js" />
+            <script type="text/javascript" src="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js" />
+            <script type="text/javascript" src="../../soap/ajax/43.0/connection.js"/>
+            <script type="text/javascript" src="../../soap/ajax/43.0/apex.js"/>
+            <apex:includeScript value="{!$Resource.pdfJS}"/>
+            <apex:includeScript value="{!$Resource.pdfJSWorker}"/>
+            <link href="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" rel="stylesheet" />
+            <apex:stylesheet value="{!$Resource.PDFtoVFP_PDF_HomePage_CSS}"/>
+            <!--End library inclusions-->
+        </head>
+
+        <body class="pageBody">
+        <!--Info box html goes here, this is the first overlay-->
+        <div id="profileSelection" class="overlay">
+            <div id="profileNames" class="overlay-content">
+                <p id="profileInfo">Select the profiles you would like to give access to your new Visualforce page:</p>
+                <br />
+                    <input id="selectAllProfiles" class="checkBoxes" type="checkbox" name="Select all Profiles" value="Select All Profiles" />
+                    <label class="checkBoxes" for="selectAllProfiles">Select all Profiles</label>
+                <br />
+                <p id="profileErrors"></p>
+                <button type="button" class="btn btn-success" onclick="grabSelectedProfiles();" id="confirm-continue">Continue</button>
+                <button type="button" class="btn btn-danger" onclick="closeNav();" id="cancel-continue">Cancel</button>
+            </div>
+        </div>
+        <!--End info box html-->
+
+        <!--Info box html goes here, this is the first overlay-->
+        <div id="infoBox" class="overlay">
+            <div class="overlay-content">
+                <canvas id="pdf-preview"></canvas>
+                <p id="pdfInfo"></p>
+                <button type="button" class="btn btn-success" onclick="beginConversion();" id="confirm-upload">Convert PDF</button>
+                <button type="button" class="btn btn-danger" onclick="closeNav();" id="cancel-upload">Cancel</button>
+            </div>
+        </div>
+        <!--End info box html-->
+
+        <!--Loading box html goes here, this is the second overlay-->
+        <div id="loadingBox" class="overlay">
+            <div class="overlay-content">
+				<div class="circle-loader" id="loader">
+				  <div class="checkmark draw"></div>
+				</div>
+				<p class="checkBoxes">Please stay on this page while the PDF is being converted.</p>
+				<p id="conversion-info"></p>
+                <button type="button" class="btn btn-success" onclick="popVFPage();" id="newVF">View new VF Page</button>
+                <button type="button" class="btn btn-danger" onclick="closeNav();" id="failButton">Cancel</button>
+            </div>
+        </div>
+        <!--End loading box html-->
+
+        <!-- PDF deletion confirmation modal -->
+        <div class="modal fade" id="deleteModal" tabindex="-1" role="dialog" aria-labelledby="deleteModal" aria-hidden="true">
+            <div class="overlay-content">
+                <div class="modal-dialog" role="document">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="exampleModalLabel">Delete PDF Confirmation</h5>
+                        </div>
+                        <div class="modal-body">
+                            Are you sure you'd like to delete this pdf? This action is not reversible.
+                        </div>
+                        <div class="modal-footer">
+                            <div id="delete-spinner" class="delete-spinner text-secondary" style="margin-right:50%;" role="status">
+                                <span class="sr-only">Loading...</span>
+                            </div>
+                            <button type="button" class="btn btn-secondary" data-dismiss="modal" onclick="hideDeleteModal();">Cancel</button>
+                            <button type="button" class="btn btn-primary" onclick="deleteConvertedPDF();">Delete PDF</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!--End PDF Deletion modal-->
+
+        <!--Main page html goes here-->
+        <div id="homePageContainer">
+
+            <!--Top page Nav Bar start-->
+            <nav class="navbar navbar-expand-md navbar-light bg-light fixed-top">
+              <a class="navbar-brand" href="#">PDF to VFP Converter : </a>
+              <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarsExampleDefault" aria-controls="navbarsExampleDefault" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+              </button>
+
+              <div class="collapse navbar-collapse" id="navbarsExampleDefault">
+                <ul class="navbar-nav mr-auto">
+                  <li class="nav-item active">
+                    <a class="nav-link" href="/">Return To Salesforce {!$User.FirstName} {!$User.LastName}<span class="sr-only">(current)</span></a>
+                  </li>
+                </ul>
+              </div>
+            </nav>
+            <!--Top page Nav Bar end-->
+
+            <!--The button above the PDF table to allow you to upload a new PDF-->
+            <button type="button" class="btn btn-info btn-lg" id="upload-button">Convert a new PDF</button>
+
+            <!--Start of PDF table, the data for this table is generated by the buildTable JS function below-->
+            <h5 id="tableName"> Previously Converted PDFs </h5>
+            <table id="tableHolder">
+            </table>
+            <!--End of PDF Table-->
+
+            <!--The ugly file input that we hide from the user, but is necessary for file selection-->
+            <input type="file" id="file-to-upload" style="display:none;" accept="application/pdf" />
+
+            <!--Hidden canvas to load pdf data-->
+            <div id="pdf-main-container">
+                <div id="pdf-contents">
+                    <canvas id="pdf-canvas" style="display:none;"></canvas>
+                    <div id="loadedImgs"></div>
+                </div>
+            </div>
+            <!--End hidden canvas-->
+         </div>
+         <!--Main page html stops here-->
+            <script>
+
+            //Setting up our list of global variables
+            var __PDF_DOC,
+                __CURRENT_PAGE,
+                __TOTAL_PAGES,
+                __PDF_ID,
+                __FILE_NAME_FINAL,
+                __PROFILE_NAMES = [],
+                __PROFILES_SELECTED = '',
+                __CANVAS = $('#pdf-canvas').get(0),
+                __PREVIEW_CANVAS = $('#pdf-preview').get(0),
+                __PREVIEW_CTX = __PREVIEW_CANVAS.getContext('2d'),
+                __CANVAS_CTX = __CANVAS.getContext('2d'),
+                __SELECTED_ROW,
+                __SELECTED_ID,
+                __SELECTED_DATA,
+                __FOLDER_ID,
+                __NEW_PDF_LINK,
+                __CONTENT_JSON,
+                __PAGES_PROCESSED;
+            //End global variable setup
+
+
+            //On window load we are calling the setup page method to setup the table of PDFs that were previously converted
+            window.onload = setupPage;
+
+            //Getting out users session id, this is required for visualforce remoting
+            sforce.connection.sessionId='{!GETSESSIONID()}';
+
+            //Function used to grab our pdf. We then utilizing PDFJS to analyze the PDF
+            function showPDF(pdf_url)
+            {
+                //Building different variations of the file name for insertions later
+                 var fileName = document.getElementById("file-to-upload").value;
+                 var fileNameNoPath = fileName.substring(fileName.lastIndexOf("\\") + 1);
+                 var fileNameNoSpace = fileNameNoPath.replace(/\s/g, '');
+                __FILE_NAME_FINAL = fileNameNoSpace.replace(".pdf","");
+
+                //Resetting all our variables each time we start a pdf conversion
+                __PAGES_PROCESSED = 0;
+                __CONTENT_JSON = '{"ContentDocuments":{"documentsList":[';
+                $('.circle-loader').removeClass('load-complete');
+                $('.circle-loader').removeClass('load-fail');
+                $('.checkmark').hide();
+                $('#pdfInfo').css({"color":"white"});
+                $('#failButton').hide();
+                $('#newVF').hide();
+
+                //Getting the pdfs data
+                PDFJS.getDocument({ url: pdf_url }).then(function(pdf_doc)
+                {
+                    __PDF_DOC = pdf_doc;
+                    __TOTAL_PAGES = __PDF_DOC.numPages;
+
+                    //Setting up our drop down ui that shows the user a preview of the page they are about to convert
+                    $('#pdfInfo').html('Our PDF conversion algorithm has determined that your PDF ' + fileNameNoPath + ' has ' + __TOTAL_PAGES + ' pages. \n Ready to convert?');
+                    showPreview();
+                    openNav();
+                    $('#upload-button').hide();
+                    $('#tableHolder').hide();
+                    $('#tableName').hide();
+
+                }).catch(function(error)
+                {
+                    console.log(error.message);
+                });
+            }
+
+            //Produces the image preview in the initial drop down ui. It loads an image of the first page into the canvas on the screen.
+            function showPreview()
+            {
+                __PDF_DOC.getPage(1).then(function(page)
+                {
+                    // As the canvas is of a fixed width we need to set the scale of the viewport accordingly
+
+                    // Get viewport of the page at required scale
+                    var viewport = page.getViewport(0.25);
+
+                    // Set canvas height
+                    __PREVIEW_CANVAS.height = viewport.height;
+                    __PREVIEW_CANVAS.width = viewport.width;
+
+                    var renderContext = {
+                        canvasContext: __PREVIEW_CTX,
+                        viewport: viewport
+                    };
+
+                    // Render the page contents in the canvas
+                    page.render(renderContext)
+                });
+            }
+
+            //Starts the actual conversion of the pdf into a vf page, this is initiated by clicking the convert pdf button
+            function beginConversion()
+            {
+                insertPDFRecord(__FILE_NAME_FINAL);
+            }
+
+            //This method loops through the pages of the pdf, uses PDFJS to turn the pages into images and then upload those images as contentdocuments and provide references to those pages by creating pdfpages
+            function showPage(page_no)
+            {
+                //Set current page
+                __CURRENT_PAGE = page_no;
+
+                //Create img element to load into the page so we can translate the canvas url to an image
+                imgElm = $('<img id="'+page_no+'">');
+                imgElm.css("display","none");
+
+                //Fetch the current page
+                __PDF_DOC.getPage(page_no).then(function(page)
+                {
+
+                    // Get viewport of the page at required scale
+                    var viewport = page.getViewport(1);
+
+                    // Set canvas height
+                    __CANVAS.height = viewport.height;
+                    __CANVAS.width = viewport.width;
+
+                    var renderContext = {
+                        canvasContext: __CANVAS_CTX,
+                        viewport: viewport
+                    };
+
+                    //Render the page contents in the canvas
+                    page.render(renderContext).then(function()
+                    {
+                        //Turn canvas url into an image
+                        imgElm.attr("src", __CANVAS.toDataURL());
+
+                        //Setting up our image source data and our image name
+                        var imgSource = imgElm.prop('src');
+                        var finalSource = imgSource.replace("data:image/png;base64,", "");
+                        var imageLabel = __FILE_NAME_FINAL + ":::" +  __CURRENT_PAGE;
+
+                        //If we still have pages to create, enter
+                        if(__CURRENT_PAGE <= __TOTAL_PAGES)
+                        {
+                            //Letting the user know what page is currently converting
+                            $('#conversion-info').html('Now Converting Page ' + __CURRENT_PAGE);
+
+                            //Setting up our JSON object to send back to the apex controller for it to interpret and transform into a contentdocument
+                             __CONTENT_JSON += '{"Title":"' + imageLabel + '", "VersionData":"' + finalSource + '", "PathOnClient":"' + imageLabel + '.png"}';
+
+                            //iterate current page
+                            __CURRENT_PAGE = __CURRENT_PAGE+1;
+
+                            //If there are still pages to convert, continue
+                            if (__CURRENT_PAGE <= __TOTAL_PAGES)
+                            {
+                                //If we can divide the current pages by 3, continue. This is necessary due to a Salesforce limitation that a string can be no longer than 6 million characters. Because of the Base64 image blob we
+                                //are sending in the JSON object 3 images equates to around 6 million characters. Any amount greater than this will often cause the limit to be exceeded.
+                                if (__CURRENT_PAGE % 3 === 0)
+                                {
+                                    //Finishing up the JSON object
+                                    __CONTENT_JSON += "]}}";
+                                    var jsonToPass = __CONTENT_JSON;
+
+                                    //Resetting the global JSON object for the next pass
+                                    __CONTENT_JSON = '{"ContentDocuments":{"documentsList":[';
+
+                                    //Sending the json to this method so that it can be passed to the controller to be converted into pdfpages and contentdocuments
+                                    generateDocumentsAndPDFPages(jsonToPass, __CURRENT_PAGE);
+                                }
+                                //If we can't divide by three, continue generating the images and the JSON
+                                else
+                                {
+                                    showPage(__CURRENT_PAGE);
+                                    __CONTENT_JSON += ", ";
+                                }
+                            }
+                            //If our current page is greater than the total page count, enter
+                            else
+                            {
+                                //Finishing up our JSON and sending it to the controller to be converted into pdfpages and contentdocuments
+                                __CONTENT_JSON += ']}}';
+                                console.log('This is the content JSON String ::: ' + __CONTENT_JSON);
+                                //Letting the user know what page is currently converting
+                                $('#conversion-info').html('Finishing up converting pdf pages to content documents.');
+                                var jsonToPass = __CONTENT_JSON;
+                                generateDocumentsAndPDFPages(jsonToPass, true);
+                            }
+                        }
+
+                    });
+                });
+            }
+
+            //This method connects to the apex controller and generates contentdocuments and pdfpages
+            function generateDocumentsAndPDFPages(jsonPassed, currentPage)
+            {
+                //Parsing our JSON object so that we can inform the user of which pages are currently being converted to content documents
+                var contentObj = JSON.parse(jsonPassed);
+                var documentListSize = Object.keys(contentObj.ContentDocuments.documentsList).length;
+                var firstPage = __PAGES_PROCESSED + 1;
+                __PAGES_PROCESSED += documentListSize;
+                $('#conversion-info').html('Currently converting pages ' + firstPage + ' - ' + __PAGES_PROCESSED + ' into a content document.');
+
+                //Utilizing VF Remoting to insert our contentdocuments and pdfpages. The first parameter is the method name, the next parameters are the variables we pass to the method, the final parameter is the callback method
+                Visualforce.remoting.Manager.invokeAction(
+                        '{!$RemoteAction.PDFtoVFP_Generator.insertContentDocuments}',
+                        jsonPassed,
+                        __FOLDER_ID,
+                        __PDF_ID,
+                        function(result, event)
+                        {
+                            //If we hit an exception, inform user and rollback
+                            if (event.type === 'exception')
+                            {
+                                var errorMsg = 'Creating the content documents and pdf pages failed due to the following error: ' + event.message;
+                                pdfGenerationFailure(errorMsg);
+                            }
+                            else
+                            {
+                                //If we were successful, continue
+                                if(result === "success")
+                                {
+                                    console.log("These are the pages processed: " + __PAGES_PROCESSED + ' ::: These are the total pages ::: ' + __TOTAL_PAGES);
+
+                                    //If our processed pages are now equal to our total page amount, continue
+                                    if(__PAGES_PROCESSED === __TOTAL_PAGES)
+                                    {
+                                        //Inform the user that we are now attempting to generate a VF Page and start the VF Page creation
+                                        $('#conversion-info').html('Attempting to generate Visualforce page.');
+                                        createVFP();
+                                    }
+                                    //If we still have more pages to process, continue
+                                    else
+                                    {
+                                        console.log('This is the result of the document insertions ::: ' + result);
+
+                                        //Call the method that continue to take the PDF's pages and turn them into PNGs
+                                        showPage(currentPage);
+                                    }
+                                }
+                                //If our result is not a success, inform the user there was an error and rollback all the changes
+                                else
+                                {
+                                    var errorMsg = 'Creating the content documents and pdf pages failed due to the following error: ' + result;
+                                    pdfGenerationFailure(errorMsg);
+                                }
+                            }
+                        },
+                        {
+                            //These setting ensure that we don't buffer our VF remoting calls together, that
+                            //we escape characters in VF Remoting calls and that we have a 2 minute timeout for the callout
+                            buffer: false,
+                            escape: true,
+                            timeout: 120000
+                        });
+            }
+
+            //This method communicates with our controller to create our new PDF__c record (this acts as a reference to the VF Page we will create later
+            function insertPDFRecord(pdfName)
+            {
+                //Utilizing VF Remoting to insert our new PDF record. The first parameter is the method name, the next parameters are the variables we pass to the method, the final parameter is the callback method
+                Visualforce.remoting.Manager.invokeAction(
+                    '{!$RemoteAction.PDFtoVFP_Generator.insertPDF}',
+                    pdfName,
+                    function(result, event)
+                    {
+                        //If we hit an exception, inform user and rollback
+                        if (event.type === 'exception')
+                        {
+                           var errorMsg = 'The file creation failed due to the following: ' + event.message + ' This is the result ::: ' + result;
+                           pdfGenerationFailure(errorMsg);
+                        }
+                        else
+                        {
+                            console.log('The main pdf record was created successfully ::: ' + result);
+
+                            if(result === 'duplicate')
+                            {
+                                $('#pdfInfo').html('A PDF with the same name has already been uploaded. PDF records must be unique. Please change the name of the PDF and re-upload it.');
+                                $('#pdfInfo').css({"color":"red"});
+                                $('#failButton').show();
+                            }
+                            else if(result === 'length')
+                            {
+                                $('#pdfInfo').html('The length of the name for your PDF cannot exceed 40 characters. This is a requirement for VF page naming conventions.');
+                                $('#pdfInfo').css({"color":"red"});
+                                $('#failButton').show();
+                            }
+                            else if(result === 'alpha')
+                            {
+                                $('#pdfInfo').html('The first character of the name for your PDF must start with a letter. This is a requirement for VF page naming conventions.');
+                                $('#pdfInfo').css({"color":"red"});
+                                $('#failButton').show();
+                            }
+                            else if(result === 'fail')
+                            {
+                                var errorMsg = 'Creating the pdf document failed to be created due to the following error: ' + result;
+                                pdfGenerationFailure(errorMsg);
+                            }
+                            else
+                            {
+                                __PDF_ID = result;
+                                insertContentFolder(pdfName);
+                            }
+                        }
+                    },
+                    {
+                        //These setting ensure that we don't buffer our VF remoting calls together, that
+                        //we escape characters in VF Remoting calls and that we have a 2 minute timeout for the callout
+                        buffer: false,
+                        escape: true,
+                        timeout: 120000
+                    });
+            }
+
+            //This method communicates with our apex controller to insert a new ContentFolder to place all of our ContentDocuments in that we will create later
+            function insertContentFolder(pdfName)
+            {
+                //Utilizing VF Remoting to insert our new ContentFolder. The first parameter is the method name, the next parameters are the variables we pass to the method, the final parameter is the callback method
+                Visualforce.remoting.Manager.invokeAction(
+                    '{!$RemoteAction.PDFtoVFP_Generator.insertFolder}',
+                    pdfName,
+                    function(result, event)
+                    {
+                        //If we hit an exception, inform user and rollback
+                        if (event.type === 'exception')
+                        {
+                            errorMsg = 'The file creation failed due to the following: ' + event.message + ' This is the result ::: ' + result;
+                            pdfGenerationFailure(errorMsg);
+                        }
+                        else
+                        {
+                            if(result !== 'fail')
+                            {
+                                console.log('The content folder was created successfully ::: ' + result);
+                                __FOLDER_ID = result;
+                                //If successful we switch to our loading nav
+                                switchNav("infoBox", "loadingBox");
+
+                                //Call the method to loop through the pages and create data based on them
+                                showPage(1)
+                            }
+                            else
+                            {
+                                var errorMsg = 'Creating the content folder failed to be inserted due to the following error: ' + result;
+                                pdfGenerationFailure(errorMsg);
+                            }
+                        }
+                    },
+                    {
+                        //These setting ensure that we don't buffer our VF remoting calls together, that
+                        //we escape characters in VF Remoting calls and that we have a 2 minute timeout for the callout
+                        buffer: false,
+                        escape: true,
+                        timeout: 120000
+                    });
+            }
+
+            //This function is utilized to connect to the Apex controller and generate our VF Page via the Tooling API
+            function createVFP()
+            {
+                //Utilizing VF Remoting to create our new VF Page. The first parameter is the method name, the next parameters are the variables we pass to the method, the final parameter is the callback method
+                $('#conversion-info').html('Attempting to generate VF Page.');
+                Visualforce.remoting.Manager.invokeAction(
+                    '{!$RemoteAction.PDFtoVFP_Generator.VFToolingManager}',
+                    __PDF_ID,
+                    __PROFILES_SELECTED,
+                    function(result, event)
+                    {
+                        //If we hit an exception, inform user and rollback
+                        if (event.type === 'exception')
+                        {
+                            var errorMsg = 'Rolling back data changes. The visualforce page was not successfully created due to the following error: ' + event.message;
+                            pdfGenerationFailure(errorMsg);
+                        }
+                        else
+                        {
+                            if(result !== 'fail')
+                            {
+                                //Inform user the conversion was successful and show our new vf page
+                                $('#conversion-info').html('Conversion successful. You will receieve an email when all profiles have been given access to your new visualforce page.');
+                                $('.circle-loader').addClass('load-complete');
+                                __NEW_PDF_LINK = result;
+                                console.log('The link to the new vf page is ::: ' + __NEW_PDF_LINK);
+                                $('#newVF').show();
+                                loadPDFTable();
+                            }
+                            else
+                            {
+                                var errorMsg = 'Creating the pdf document failed due to the following error: ' + result;
+                                pdfGenerationFailure(errorMsg);
+                            }
+                        }
+                    },
+                    {
+                        //These setting ensure that we don't buffer our VF remoting calls together, that
+                        //we escape characters in VF Remoting calls and that we have a 2 minute timeout for the callout
+                        buffer: false,
+                        escape: true,
+                        timeout: 120000
+                    });
+            }
+
+            //If we hit an error we call this function and it deletes the pdf record, which in turn deletes all other records
+            function deleteConvertedPDF()
+            {
+                $("#delete-spinner").addClass("spinner-border");
+                var pdfIdToDelete = null;
+
+                if(__SELECTED_ID)
+                {
+                    pdfIdToDelete = __SELECTED_ID;
+                }
+                else if(__PDF_ID)
+                {
+                    pdfIdToDelete = __PDF_ID;
+                }
+
+                //Attempt to create the vf page by calling our apex method in the class PDFtoVFP_Generator
+                //$('#conversion-info').html('Deleting converted Visualforce page.');
+                Visualforce.remoting.Manager.invokeAction(
+                    '{!$RemoteAction.PDFtoVFP_Generator.deletePDFFiles}',
+                    pdfIdToDelete,
+                    function(result, event)
+                    {
+                        //If we hit an exception, inform user and rollback
+                        if (event.type === 'exception')
+                        {
+                            $('#conversion-info').html('Delete failed due to the following: ' + event.message);
+                            $('#failButton').show();
+                        }
+                        else
+                        {
+                            //Inform user the conversion was successful and show our new vf page
+                            //$('#conversion-info').html('Delete successful.');
+                            $('.circle-loader').addClass('load-complete');
+                            __PDF_ID = null;
+                            __SELECTED_ID = null;
+                            if(__SELECTED_ROW)
+                            {
+                                $('#'+pdfIdToDelete).remove();
+                            }
+
+                            $("#deleteModal").hide();
+                            $("#delete-spinner").removeClass("spinner-border");
+                        }
+                    },
+                    {
+                        //These setting ensure that we don't buffer our VF remoting calls together, that
+                        //we escape characters in VF Remoting calls and that we have a 2 minute timeout for the callout
+                        buffer: false,
+                        escape: true,
+                        timeout: 120000
+                    });
+            }
+
+            //This method is utilized to show the delete modal to confirm with the user that they actually want to delete the PDF the selected to delete
+            function checkDelete(fileName, rownum, pdfId)
+            {
+                __SELECTED_DATA = fileName;
+                __SELECTED_ROW = rownum;
+                __SELECTED_ID = pdfId;
+
+                $("#deleteModal").css({"opacity":"0"});
+                $("#deleteModal").show();
+                $("#deleteModal").animate({opacity:1});
+                $("#deleteModal").css({"top":"20%", "overflow":"inherit"});
+
+            }
+
+            //This method is used to hide the delete modal after a deletion has finished
+            function hideDeleteModal()
+            {
+                __SELECTED_DATA = null;
+                __SELECTED_ROW = null;
+                __SELECTED_ID = null;
+                $("#deleteModal").hide();
+            }
+
+            // Upon click this should should trigger click on the #file-to-upload file input element
+            // This is better than showing the not-good-looking file input element
+            $("#upload-button").on('click', function() {
+                $("#file-to-upload").trigger('click');
+            });
+
+            //This method is called When the user chooses a PDF file to convert
+            $("#file-to-upload").on('change', function() {
+                // Validate whether PDF
+                if(['application/pdf'].indexOf($("#file-to-upload").get(0).files[0].type) == -1) {
+                    alert('Error : Not a PDF');
+                    return;
+                }
+
+                // Send the object url of the pdf
+                showPDF(URL.createObjectURL($("#file-to-upload").get(0).files[0]));
+            });
+
+            //This event handler attaches a click handler to the select all profiles button.
+            //If the select all checkbox is clicked, all other checkboxes will be clicked as well and vice versa
+            $("#selectAllProfiles").click(function () {
+                $(".profRows").prop('checked', $(this).prop('checked'));
+            });
+
+            //Used to open the first drop down display
+            function openNav()
+            {
+                document.getElementById("profileSelection").style.height = "100%";
+            }
+
+            //Used to close the current nav bar and reset relevant elements
+            function closeNav()
+            {
+                document.getElementById("infoBox").style.height = "0%";
+                document.getElementById("loadingBox").style.height = "0%";
+                document.getElementById("profileSelection").style.height = "0%";
+                $('.circle-loader').addClass('load-fail');
+                $('#conversion-info').html('Now Converting Page 1');
+                $('#failButton').hide();
+                $('#upload-button').show();
+                $('#tableHolder').show();
+                $('#tableName').show();
+                __PROFILES_SELECTED = '';
+            }
+
+            //Used to switch between the info nav and the loading nav
+            function switchNav(divClosed, divOpened)
+            {
+                document.getElementById(divClosed).style.height = "0%";
+                document.getElementById(divOpened).style.height = "100%";
+            }
+
+            //Used to pop a new tab with the new vf page we just created from the PDF
+            function popVFPage()
+            {
+                var newURL = __NEW_PDF_LINK;
+                window.open(newURL , '_blank');
+                document.getElementById("loadingBox").style.height = "0%";
+                $('.circle-loader').addClass('load-complete');
+                $('#upload-button').show();
+                $('#tableHolder').show();
+                $('#tableName').show();
+                __PROFILES_SELECTED = '';
+            }
+
+            //This function is utilized to setup the checkboxes for the profiles
+            function setupCheckBoxes()
+            {
+                //Finding the profile errors element so we append our profile checkboxes above it
+                var profileErrors = document.getElementById("profileErrors");
+
+                //Looping through the list of profile names we retrieved from the controller and presenting them to the user
+                for(var p = 0; p < __PROFILE_NAMES.length; p++)
+                {
+                    //Setting up variables for html elements we will later append to the page
+                    var linebreak = document.createElement("br");
+                    var container = document.getElementById('profileNames');
+                    var checkbox = document.createElement('input');
+                    checkbox.type = "checkbox";
+                    checkbox.name = __PROFILE_NAMES[p];
+                    checkbox.value =  __PROFILE_NAMES[p];
+                    checkbox.id =  __PROFILE_NAMES[p];
+                    checkbox.className =  'profRows';
+
+                    //Setting up the label for our checkbox (the profile name next to the checkbox)
+                    var label = document.createElement('label');
+                    label.htmlFor =  __PROFILE_NAMES[p];
+                    label.appendChild(document.createTextNode( __PROFILE_NAMES[p]));
+                    label.className =  'profRows';
+                    label.style = "color:white; padding: 10px 15px 10px 10px";
+
+                    //Appending the checkbox and label to the ProfileNames div
+                    container.appendChild(checkbox);
+                    container.appendChild(label);
+
+                    //Using the insert before method to ensure that the profile checkboxes are presented correctly on the page
+                    container.insertBefore(linebreak, profileErrors);
+                    container.insertBefore(label, linebreak);
+                    container.insertBefore(checkbox, label);
+                }
+            }
+
+            //Gets the list of profiles that the user selected and places them in the profiles selected string
+            function grabSelectedProfiles()
+            {
+                //Looping through our list of checked checkboxes and adding them to the profiles selected list to pass to the apex controller later
+                $("input:checkbox[type=checkbox]:checked").each(function()
+                {
+                    if($(this).val().toLowerCase() !==  'select all profiles')
+                    {
+                        __PROFILES_SELECTED += $(this).val() + ',';
+                    }
+                });
+
+                //This call switch the UI navigation to the next screen
+                switchNav('profileSelection','infoBox');
+            }
+
+            //This function is called when the page loads to setup the UI
+            function setupPage()
+            {
+                //Takes our string of profile names we retrieved in the Apex controllers constructor and turns it into a list of strings
+                __PROFILE_NAMES = '{!profileNames}'.replace("[", "").replace("]", "").split(",");
+
+                //Setting up the checkboxes for the profiles and then loading the table of previously converted PDFs
+                setupCheckBoxes();
+                loadPDFTable();
+            }
+
+            //This function calls out to the apex controller to retrieve a list of existing PDFs and then produce a table for those PDFs to present to the user
+            function loadPDFTable()
+            {
+                //Utilizing VF Remoting to get a list of our existing PDFs. The first parameter is the method name, the next parameters are the variables we pass to the method, the final parameter is the callback method
+                Visualforce.remoting.Manager.invokeAction(
+                    '{!$RemoteAction.PDFtoVFP_Generator.getPDFs}',
+                    function(result, event)
+                    {
+                        //If we hit an exception, inform user and rollback
+                        if (event.type === 'exception')
+                        {
+                            console.log('The pdfs could not be retrieved from the server because of the following error: ' + event.message + ' This is the result ::: ' + result);
+                        }
+                        //If we don't have an issues, build our PDF table
+                        else
+                        {
+                            console.log('The pdfs were successfully retrieved ::: ' + result);
+                            buildTable(result);
+                        }
+                    },
+                    {
+                        //These setting ensure that we don't buffer our VF remoting calls together, that
+                        //we escape characters in VF Remoting calls and that we have a 2 minute timeout for the callout
+                        buffer: false,
+                        escape: true,
+                        timeout: 120000
+                    });
+            }
+
+            //This method builds the table for our existing PDFs
+            function buildTable(queryResult)
+            {
+                //Empty the table on every refresh to start over fresh
+                $("#tableHolder").empty();
+
+                //Appending the header to the table
+                $('#tableHolder').append('<thead>\n' +
+                    '                    <tr>\n' +
+                    '                        <th>Remove</th>\n' +
+                    '                        <th>View VF Page</th>\n' +
+                    '                    </tr>\n' +
+                    '                </thead>\n');
+
+                //assigning the list of pdfs to a variable
+                var pdfs = queryResult;
+
+                //Iterating through the list of PDFs and producing data for them in the PDF table to present them to the user
+                for(var i = 0; i<pdfs.length; i++)
+                {
+                    var pdfFound = pdfs[i];
+                    $('#tableHolder').append(
+                        '<tr id = "'+pdfFound.Id+'">'
+                        +'<td><button type="button" class="btn btn-danger" onclick="checkDelete(\''+pdfFound.Name+'\', '+(i+1)+', \''+pdfFound.Id+'\');">Delete</button></td>'
+                        +'<td><a target="_blank" href="' + pdfFound.gAuto__Link_To_VF_Page__c + '">' + pdfFound.Name + '</a></td>'
+                        +'</tr>'
+                    );
+                }
+            }
+
+            //This function is utilized to do all unified failure operations. Stop the loader wheel, present an error message, show the failure button
+            //and rollback and delete all pieces of the PDF that were inserted prior to this failure
+            function pdfGenerationFailure(errorMsg)
+            {
+                $('.circle-loader').addClass('load-fail');
+                $('#conversion-info').html(errorMsg + ' All changes have been rolled back.');
+                $('#failButton').show();
+                deleteConvertedPDF();
+            }
+
+            </script>
+        </body>
+    </html>
+</apex:page>
